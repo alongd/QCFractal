@@ -3,6 +3,7 @@ Either pull in QCEl models or local models
 """
 
 from . import rest_models
+from . import ts_search
 from .common_models import (
     AutodocBaseSettings,
     Citation,
