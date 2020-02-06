@@ -13,6 +13,7 @@ name: qcarchive
 channels:
   - defaults
   - conda-forge
+  - rmg
 dependencies:
   - python
 
@@ -42,11 +43,14 @@ dependencies:
   - pyarrow >=0.13.0
   - tqdm
 
-  # Test depends
+  # Test dependencies
   - codecov
   - pytest
   - pytest-cov
   - requests-mock
+
+  # External dependencies
+  - rmg >=3.0.0
 """
 qca_ecosystem_template = ["qcengine >=0.11.0", "qcelemental >=0.9.0"]
 

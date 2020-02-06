@@ -2,6 +2,7 @@ name: qcarchive
 channels:
   - defaults
   - conda-forge
+  - rmg
 dependencies:
   - python
 
@@ -45,6 +46,7 @@ dependencies:
   - ipyparallel
   - ipykernel
   - parsl >=0.9.0
+  - rmg >= 3.0.0
 
 #   QCArchive includes
   - qcengine >=0.11.0

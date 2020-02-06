@@ -2,6 +2,7 @@ name: qcarchive
 channels:
   - defaults
   - conda-forge
+  - rmg
 dependencies:
   - python
 
@@ -39,6 +40,7 @@ dependencies:
 
 #   Environment specific includes
   - rdkit
+  - rmg >=3.0.0
 
 #   QCArchive includes
 

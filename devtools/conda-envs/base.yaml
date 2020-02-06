@@ -2,6 +2,7 @@ name: qcarchive
 channels:
   - defaults
   - conda-forge
+  - rmg
 dependencies:
   - python
 
@@ -31,7 +32,7 @@ dependencies:
   - pyarrow >=0.13.0
   - tqdm
 
-  # Test depends
+  # Test dependencies
   - codecov
   - pytest
   - pytest-cov
@@ -40,3 +41,6 @@ dependencies:
 #   QCArchive includes
   - qcengine >=0.11.0
   - qcelemental >=0.11.0
+
+#   External dependencies
+  - rmg >= 3.0.0
