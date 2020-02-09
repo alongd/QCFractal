@@ -21,6 +21,8 @@ from arc.common import colliding_atoms, get_logger, key_by_val
 from arc.species.converter import zmat_from_xyz, zmat_to_xyz
 from arc.species.zmat import compare_zmats, get_parameter_from_atom_indices, is_angle_linear, up_param
 
+from .ts_adapter import TSAdapter
+
 
 IMPLEMENTED_FAMILIES = ['H_Abstraction']
 
@@ -214,7 +216,7 @@ def combine_coordinates_with_redundant_atoms(xyz1, xyz2, mol1, mol2, h1, h2, c=N
     return zmat_to_xyz(zmat=combined_zmat, keep_dummy=keep_dummy)
 
 
-def generate_ts_guesses_by_heuristics(arc_reaction, dihedral_increment=20):
+def generate_guesses(arc_reaction, dihedral_increment=20):
     """
     Generate several TS guesses according to the RMG reaction family.
 
