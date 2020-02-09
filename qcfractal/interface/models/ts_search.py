@@ -13,12 +13,41 @@ import numpy as np
 # from sqlalchemy.orm import column_property, relationship
 
 from .rmg_db import determine_reaction_family
+from .ts_adapters import TSAdapter
+
 import qcelemental as qcel
 # from qcfractal.storage_sockets.models.sql_models import KeywordsORM, KVStoreORM, MoleculeORM
 
 from rmgpy.data.rmg import RMGDatabase
 from rmgpy.reaction import Reaction
 from rmgpy.species import Species
+
+
+class TSMethodsEnum(str, Enum):
+    """
+    The supported methods for a TS search. The methods which are available are a finite set.
+    """
+
+    autotst = 'autotst'  # AutoTST
+    gsm = 'gsm'  # double ended growing string method (DE-GSM)
+    heuristics = 'heuristics'  # brute force heuristics
+    kinbot = 'kinbot'  # KinBot
+    ml = 'ml'  # machine learning  Todo: will we have more than one ML module? probably yes... expand
+    neb_ase = 'neb_ase'  # NEB in ASE
+    neb_terachem = 'neb_terachem'  # NEB in TeraChem
+    qst2 = 'qst2'  # Synchronous Transit-Guided Quasi-Newton (STQN) implemented in Gaussian
+    user = 'user'  # user guesses
+
+
+class TSJobTypesEnum(str, Enum):
+    """
+    The available job types in a TS search. The job types which are available are a finite set.
+    """
+
+    opt = 'opt'  # geometry optimization
+    freq = 'freq'  # frequency calculation
+    sp = 'sp'  # single point calculation
+    irc = 'irc'  # internal redundant coordinate calculation
 
 
 class TSSearch(object):
@@ -44,7 +73,7 @@ class TSSearch(object):
             Entries are Molecule IDs, collectively describing a well (e,g,. products).
         methods : list
             The TS Search methods to carry out.
-            Optional values: 'autotst', 'gsm', 'heuristics', 'kinbot', 'ml', 'neb_ase', 'neb_terachem', 'qst2', 'user'.
+            Allowed values: 'autotst', 'gsm', 'heuristics', 'kinbot', 'ml', 'neb_ase', 'neb_terachem', 'qst2', 'user'.
         levels: dict
             Keys are job types (allowed values are 'opt', 'freq', 'sp', 'irc'),
             values are the corresponding levels of theory.
@@ -67,7 +96,10 @@ class TSSearch(object):
 
         self.ts_search_id = ts_search_id
 
-        self.methods = [TSMethodsEnum(method) for method in methods]
+        for method in methods:
+            if method not in list(_registered_ts_adapters.keys()):
+                raise ValueError(f'Could not interpret unregistered method {method}')
+        self.methods = {TSMethodsEnum(method) for method in methods}
         self.levels = {TSJobTypesEnum(key): val for key, val in levels.items()}
 
         self.well_ids_1 = well_ids_1
@@ -104,44 +136,61 @@ class TSSearch(object):
 
         for method in self.methods:
             if found(method):
+                ts_adapter = self.ts_method_factory(ts_adapter=method)
+                ts_guesses = ts_adapter.generate_guesses()
+                for ts_guess in ts_guesses:
+                    if not colliding_atoms(ts_guess):
+                        ts_guess_id = len(list(self.ts_guesses.keys()))  # 0-indexed
+                        self.ts_guesses[ts_guess_id] = {
+                            'method': method,
+                            'symbols': ts_guess['symbols'],
+                            'guess geometry': ts_guess['geometry'],
+                            'optimized geometry': None,
+                            'energy': None,
+                            'irc isomorphism': [None, None],
+                        }
 
-                if method == TSMethodsEnum.autotst:
-                    pass
 
-                elif method == TSMethodsEnum.gsm:
-                    pass
-
-                elif method == TSMethodsEnum.heuristics:
-                    pass
-
-                elif method == TSMethodsEnum.kinbot:
-                    pass
-
-                elif method == TSMethodsEnum.ml:
-                    pass
-
-                elif method == TSMethodsEnum.neb_ase:
-                    pass
-
-                elif method == TSMethodsEnum.neb_terachem:
-                    pass
-
-                elif method == TSMethodsEnum.qst2:
-                    pass
-
-                elif method == TSMethodsEnum.user and self.user_guesses is not None:
-                    for coords in self.user_guesses:
-                        symbols, geometry = str_to_geometry(coords)  # Todo: How is this done in QCX?
-                        if not len(qcel.molutil.guess_connectivity(symbols, geometry, threshold=0.9)):
-                            # no colliding atoms, proceed
-                            ts_guess_id = len(list(self.ts_guesses.keys()))  # 0-indexed
-                            self.ts_guesses[ts_guess_id] = {'method': method,
-                                                            'symbols': symbols,
-                                                            'guess geometry': geometry,
-                                                            'optimized geometry': None,
-                                                            'energy': None,
-                                                            'irc isomorphism': [None, None],
-                                                            }
+        # for method in self.methods:
+        #     if found(method):
+        #
+        #         if method == TSMethodsEnum.autotst:
+        #             pass
+        #
+        #         elif method == TSMethodsEnum.gsm:
+        #             pass
+        #
+        #         elif method == TSMethodsEnum.heuristics:
+        #             pass
+        #
+        #         elif method == TSMethodsEnum.kinbot:
+        #             pass
+        #
+        #         elif method == TSMethodsEnum.ml:
+        #             pass
+        #
+        #         elif method == TSMethodsEnum.neb_ase:
+        #             pass
+        #
+        #         elif method == TSMethodsEnum.neb_terachem:
+        #             pass
+        #
+        #         elif method == TSMethodsEnum.qst2:
+        #             pass
+        #
+        #         elif method == TSMethodsEnum.user and self.user_guesses is not None:
+        #             for coords in self.user_guesses:
+        #                 symbols, geometry = str_to_geometry(coords)  # Todo: How is this done in QCX?
+        #                 if not len(qcel.molutil.guess_connectivity(symbols, geometry, threshold=0.9)):
+        #                     # no colliding atoms, proceed
+        #                     ts_guess_id = len(list(self.ts_guesses.keys()))  # 0-indexed
+        #                     self.ts_guesses[ts_guess_id] = {'method': method,
+        #                                                     'symbols': symbols,
+        #                                                     'guess geometry': geometry,
+        #                                                     'optimized geometry': None,
+        #                                                     'energy': None,
+        #                                                     'irc isomorphism': [None, None],
+        #                                                     }
 
     def determine_rmg_reaction_family(self) -> None:
         """
@@ -157,32 +206,22 @@ class TSSearch(object):
         else:
             self.rmg_family = None
 
+    def ts_method_factory(self, ts_adapter: TSMethodsEnum) -> TSAdapter:
+        """
+        A factory generating the TS search method adapter corresponding to ``ts_adapter``.
 
-class TSMethodsEnum(str, Enum):
-    """
-    The supported methods for a TS search. The methods which are available are a finite set.
-    """
+        Parameters
+        ----------
+        ts_adapter: TSMethodsEnum
+            A string representation for a TS search adapter.
 
-    autotst = 'autotst'  # AutoTST
-    gsm = 'gsm'  # double ended growing string method (DE-GSM)
-    heuristics = 'heuristics'  # brute force heuristics
-    kinbot = 'kinbot'  # KinBot
-    ml = 'ml'  # machine learning  Todo: will we have more than one ML module? probably yes... expand
-    neb_ase = 'neb_ase'  # NEB in ASE
-    neb_terachem = 'neb_terachem'  # NEB in TeraChem
-    qst2 = 'qst2'  # Synchronous Transit-Guided Quasi-Newton (STQN) implemented in Gaussian
-    user = 'user'  # user guesses
-
-
-class TSJobTypesEnum(str, Enum):
-    """
-    The available job types in a TS search. The job types which are available are a finite set.
-    """
-
-    opt = 'opt'  # geometry optimization
-    freq = 'freq'  # frequency calculation
-    sp = 'sp'  # single point calculation
-    irc = 'irc'  # internal redundant coordinate calculation
+        Returns
+        -------
+        TSAdapter
+            The requested TSAdapter object, initialized with the respective reaction information,
+        """
+        ts_method = _registered_ts_adapters[ts_adapter](rmg_rxn=self.)
+        return ts_method
 
 
 def found(method: TSMethodsEnum, raise_error: bool = False) -> bool:
@@ -232,3 +271,39 @@ def found(method: TSMethodsEnum, raise_error: bool = False) -> bool:
                            f'see {url_dict[method]} for more information',
                  )
 
+
+def colliding_atoms(ts_guess: dict) -> bool:
+    """
+    Check whether the ``ts_guess`` has atom collisions.
+
+    Parameters
+    ----------
+    ts_guess: dict
+        The TS guess dict with 'symbols' and 'geometry' keys
+
+    Returns
+    -------
+    bool
+        Whether this TS guess has atom collisions,
+    """
+
+    return not len(qcel.molutil.guess_connectivity(ts_guess['symbols'], ts_guess['geometry'], threshold=0.9))
+
+
+_registered_ts_adapters = {}
+
+
+def register_ts_adapter(ts_method: TSMethodsEnum, ts_method_class: TSAdapter) -> None:
+    """
+    A register for TS search methods adapters.
+
+    Parameters
+    ----------
+    ts_method: TSMethodsEnum
+        A string representation for a TS search adapter.
+    ts_method_class: TSAdapter
+        The TS search method adapter class (a child of TSAdapter).
+    """
+    if not issubclass(ts_method_class, TSAdapter):
+        raise TypeError(f'{ts_method_class} is not a TSAdapter.')
+    _registered_ts_adapters[ts_method] = ts_method_class
