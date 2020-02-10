@@ -1,5 +1,5 @@
 """
-A module for performing reaction transition state searches
+A module for performing reaction transition state searches.
 
 Todo:
   - Think whether GSM should have harnesses. probably yes, and it should be treated like we treat ESS.
@@ -9,6 +9,7 @@ Todo:
 
 from enum import Enum
 import numpy as np
+import typing
 
 # from sqlalchemy.orm import column_property, relationship
 
@@ -51,6 +52,10 @@ class TSJobTypesEnum(str, Enum):
 
 
 class TSSearch(object):
+    """
+    A class for performing reaction transition state searches.
+    """
+
     def __init__(
             self,
             ts_search_id: int,
@@ -61,7 +66,8 @@ class TSSearch(object):
             user_guesses: list = None,
             rmg_db: RMGDatabase = None
     ) -> None:
-        """Initializes a TSSearch instance.
+        """
+        Initializes a TSSearch instance.
 
         Parameters
         ----------
@@ -111,18 +117,20 @@ class TSSearch(object):
         self.rmg_db = rmg_db
         self.ts_guesses = dict()
 
-        self.determine_rmg_reaction_family()
+        self.determine_rmg_reaction_and_family()
 
         self.search()
 
     def __repr__(self) -> str:
-        """A short representation of the current TSSearch.
+        """
+        A short representation of the current TSSearch.
 
         Returns
         -------
         str
             The desired representation.
         """
+
         return f"TSSearch(ts_search_id='{self.ts_search_id}', " \
             f"well_ids_1='{self.well_ids_1}', well_ids_2='{self.well_ids_2}', " \
             f"methods='{self.methods}', levels={self.levels}, " \
@@ -143,56 +151,14 @@ class TSSearch(object):
                         ts_guess_id = len(list(self.ts_guesses.keys()))  # 0-indexed
                         self.ts_guesses[ts_guess_id] = {
                             'method': method,
-                            'symbols': ts_guess['symbols'],
-                            'guess geometry': ts_guess['geometry'],
-                            'optimized geometry': None,
+                            'elem': ts_guess['elem'],
+                            'guess geom': ts_guess['geom'],
+                            'optimized geom': None,
                             'energy': None,
                             'irc isomorphism': [None, None],
                         }
 
-
-        # for method in self.methods:
-        #     if found(method):
-        #
-        #         if method == TSMethodsEnum.autotst:
-        #             pass
-        #
-        #         elif method == TSMethodsEnum.gsm:
-        #             pass
-        #
-        #         elif method == TSMethodsEnum.heuristics:
-        #             pass
-        #
-        #         elif method == TSMethodsEnum.kinbot:
-        #             pass
-        #
-        #         elif method == TSMethodsEnum.ml:
-        #             pass
-        #
-        #         elif method == TSMethodsEnum.neb_ase:
-        #             pass
-        #
-        #         elif method == TSMethodsEnum.neb_terachem:
-        #             pass
-        #
-        #         elif method == TSMethodsEnum.qst2:
-        #             pass
-        #
-        #         elif method == TSMethodsEnum.user and self.user_guesses is not None:
-        #             for coords in self.user_guesses:
-        #                 symbols, geometry = str_to_geometry(coords)  # Todo: How is this done in QCX?
-        #                 if not len(qcel.molutil.guess_connectivity(symbols, geometry, threshold=0.9)):
-        #                     # no colliding atoms, proceed
-        #                     ts_guess_id = len(list(self.ts_guesses.keys()))  # 0-indexed
-        #                     self.ts_guesses[ts_guess_id] = {'method': method,
-        #                                                     'symbols': symbols,
-        #                                                     'guess geometry': geometry,
-        #                                                     'optimized geometry': None,
-        #                                                     'energy': None,
-        #                                                     'irc isomorphism': [None, None],
-        #                                                     }
-
-    def determine_rmg_reaction_family(self) -> None:
+    def determine_rmg_reaction_and_family(self) -> None:
         """
         Create an RMG Reaction object corresponding to the given wells,
         and determine the RMG family.
@@ -200,11 +166,11 @@ class TSSearch(object):
 
         if any(method in self.methods
                for method in [TSMethodsEnum.autotst, TSMethodsEnum.heuristics, TSMethodsEnum.kinbot]):
-            rmg_reaction = Reaction(reactants=[Species(smiles=well.to_smiles()) for well in self.well_1],
-                                    products=[Species(smiles=well.to_smiles()) for well in self.well_2])
-            self.rmg_family = determine_reaction_family(self.rmg_db, rmg_reaction)
+            self.rmg_reaction = Reaction(reactants=[Species(smiles=well.to_smiles()) for well in self.well_1],
+                                         products=[Species(smiles=well.to_smiles()) for well in self.well_2])
+            self.rmg_reaction.family = determine_reaction_family(self.rmg_db, self.rmg_reaction)
         else:
-            self.rmg_family = None
+            self.rmg_reaction = None
 
     def ts_method_factory(self, ts_adapter: TSMethodsEnum) -> TSAdapter:
         """
@@ -220,7 +186,8 @@ class TSSearch(object):
         TSAdapter
             The requested TSAdapter object, initialized with the respective reaction information,
         """
-        ts_method = _registered_ts_adapters[ts_adapter](rmg_rxn=self.)
+        ts_method = _registered_ts_adapters[ts_adapter](user_guesses=self.user_guesses,
+                                                        rmg_reaction=self.rmg_reaction)
         return ts_method
 
 
@@ -293,7 +260,7 @@ def colliding_atoms(ts_guess: dict) -> bool:
 _registered_ts_adapters = {}
 
 
-def register_ts_adapter(ts_method: TSMethodsEnum, ts_method_class: TSAdapter) -> None:
+def register_ts_adapter(ts_method: TSMethodsEnum, ts_method_class: typing.Type[TSAdapter]) -> None:
     """
     A register for TS search methods adapters.
 
@@ -301,7 +268,7 @@ def register_ts_adapter(ts_method: TSMethodsEnum, ts_method_class: TSAdapter) ->
     ----------
     ts_method: TSMethodsEnum
         A string representation for a TS search adapter.
-    ts_method_class: TSAdapter
+    ts_method_class: child(TSAdapter)
         The TS search method adapter class (a child of TSAdapter).
     """
     if not issubclass(ts_method_class, TSAdapter):
