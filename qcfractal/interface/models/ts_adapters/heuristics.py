@@ -9,7 +9,7 @@ Todo:
 
 import itertools
 
-# import zmats
+from zmats import compare_zmats, get_parameter_from_atom_indices, is_angle_linear, up_param
 
 from rmgpy.data.kinetics.database import KineticsDatabase
 from rmgpy.data.kinetics.family import KineticsFamily
@@ -17,14 +17,134 @@ from rmgpy.data.rmg import RMGDatabase
 from rmgpy.exceptions import ActionError
 from rmgpy.reaction import Reaction
 
-from arc.common import colliding_atoms, get_logger, key_by_val
+from arc.common import colliding_atoms, key_by_val
 from arc.species.converter import zmat_from_xyz, zmat_to_xyz
-from arc.species.zmat import compare_zmats, get_parameter_from_atom_indices, is_angle_linear, up_param
 
+from .factory import register_ts_adapter
 from .ts_adapter import TSAdapter
 
 
 IMPLEMENTED_FAMILIES = ['H_Abstraction']
+
+
+class HeuristicsAdapter(TSAdapter):
+    """
+    A class for representing brute-force heuristics for transition state guesses.
+    """
+
+    def __init__(self, user_guesses: list = None,
+                 rmg_reaction: Reaction = None,
+                 dihedral_increment: float = 20,
+                 ) -> None:
+        """
+        Initializes a HeuristicsAdapter instance.
+
+        Parameters
+        ----------
+        user_guesses : list
+            TS user guesses, not used in the HeuristicsAdapter class.
+        rmg_reaction: Reaction, optional
+            The RMG Reaction object, not used in the UserAdapter class.
+        dihedral_increment: float, optional
+            The scan dihedral increment to use when generating guesses.
+        """
+        if rmg_reaction is not None and not isinstance(rmg_reaction, Reaction):
+            raise TypeError(f'rmg_reaction must be an RMG Reaction instance, got\n'
+                            f'{rmg_reaction}\n'
+                            f'which is a {type(rmg_reaction)}.')
+        self.rmg_reaction = rmg_reaction
+        self.dihedral_increment = dihedral_increment
+
+    def __repr__(self) -> str:
+        """A short representation of the current HeuristicsAdapter.
+
+        Returns
+        -------
+        str
+            The desired representation.
+        """
+        return f"HeuristicsAdapter(rmg_reaction={self.rmg_reaction}, dihedral_increment={self.dihedral_increment})"
+
+    def generate_guesses(self) -> list:
+        """
+        Generate TS guesses using heuristics according to the respective RMG reaction family.
+
+        Returns
+        -------
+        list
+            Entries are TS guess dictionaries.
+
+        # Todo: adapt `arc_reaction` to qcf's syntax
+        """
+        if self.rmg_reaction is None:
+            return list()
+
+        results = list()
+
+        if self.rmg_reaction.family is None:
+            print('Error: Cannot generate a TS guess for a reaction using heuristics without an RMG family attribute.')
+            return list()
+
+        if self.rmg_reaction.family.label not in IMPLEMENTED_FAMILIES:
+            print(f'Error: Heuristics-based TS guesses generation for reaction family '
+                  f'{self.rmg_reaction.family} is not implemented yet.')
+
+        arc_reaction.arc_species_from_rmg_reaction()
+        reactant_mol_combinations = list(
+            itertools.product(*list(reactant.mol_list for reactant in arc_reaction.r_species)))
+        product_mol_combinations = list(
+            itertools.product(*list(product.mol_list for product in arc_reaction.p_species)))
+        reaction_list = list()
+        for reactants in list(reactant_mol_combinations):
+            for products in list(product_mol_combinations):
+                reaction = label_molecules(list(reactants), list(products), arc_reaction.family)
+                if reaction is not None:
+                    reaction_list.append(reaction)
+        results = list()
+
+        if self.rmg_reaction.family.label == 'H_Abstraction':
+            results = h_abstraction(arc_reaction, reaction_list, dihedral_increment=dihedral_increment)
+        return results
+
+
+
+
+
+
+
+def generate_guesses(arc_reaction, dihedral_increment=20):
+    """
+    Generate several TS guesses according to the RMG reaction family.
+
+    Args:
+        arc_reaction (ARCReaction): The reaction to generate TS guesses for. The .family attribute must be populated.
+        dihedral_increment (float, optional): The dihedral increment to use for generating the guesses.
+
+    Returns:
+        list: Entries are xyz guesses for the TS.
+    """
+    if arc_reaction.family is None:
+        print('Error: Cannot generate a TS guess for a reaction using heuristics without an RMG family attribute')
+        return list()
+    if arc_reaction.family.label not in IMPLEMENTED_FAMILIES:
+        raise NotImplementedError(f'Heuristics-based TS guess for reaction family {arc_reaction.family} '
+                                  f'is not implemented yet.')
+
+    arc_reaction.arc_species_from_rmg_reaction()
+    reactant_mol_combinations = list(itertools.product(*list(reactant.mol_list for reactant in arc_reaction.r_species)))
+    product_mol_combinations = list(itertools.product(*list(product.mol_list for product in arc_reaction.p_species)))
+    reaction_list = list()
+    for reactants in list(reactant_mol_combinations):
+        for products in list(product_mol_combinations):
+            reaction = label_molecules(list(reactants), list(products), arc_reaction.family)
+            if reaction is not None:
+                reaction_list.append(reaction)
+    xyz_guesses = list()
+
+    if arc_reaction.family.label == 'H_Abstraction':
+        xyz_guesses = h_abstraction(arc_reaction, reaction_list, dihedral_increment=dihedral_increment)
+
+    return xyz_guesses
 
 
 def combine_coordinates_with_redundant_atoms(xyz1, xyz2, mol1, mol2, h1, h2, c=None, d=None,
@@ -106,8 +226,8 @@ def combine_coordinates_with_redundant_atoms(xyz1, xyz2, mol1, mol2, h1, h2, c=N
         raise ValueError('The d2 parameter (the B-H-A-C dihedral) must be given if the a2 angle (B-H-A) is not close '
                       'to 180 degrees, got None.')
     if is_angle_linear(a2) and d2 is not None:
-        logger.warning(f'The combination a2={a2} and d2={d2} is meaningless (cannot rotate a dihedral about a linear '
-                       f'angle). Not considering d2.')
+        print(f'Warning: The combination a2={a2} and d2={d2} is meaningless (cannot rotate a dihedral about a linear '
+              f'angle). Not considering d2.')
         d2 = None
     if len(mol1.atoms) > 2 and c is None:
         raise ValueError('The c parameter (the index of atom C in xyz1) must be given if mol1 has 3 or more atoms, '
@@ -216,39 +336,6 @@ def combine_coordinates_with_redundant_atoms(xyz1, xyz2, mol1, mol2, h1, h2, c=N
     return zmat_to_xyz(zmat=combined_zmat, keep_dummy=keep_dummy)
 
 
-def generate_guesses(arc_reaction, dihedral_increment=20):
-    """
-    Generate several TS guesses according to the RMG reaction family.
-
-    Args:
-        arc_reaction (ARCReaction): The reaction to generate TS guesses for. The .family attribute must be populated.
-        dihedral_increment (float, optional): The dihedral increment to use for generating the guesses.
-
-    Returns:
-        list: Entries are xyz guesses for the TS.
-    """
-    if arc_reaction.family is None:
-        logger.error('Cannot generate a TS guess for a reaction using heuristics without an RMG family attribute')
-        return list()
-    if arc_reaction.family.label not in IMPLEMENTED_FAMILIES:
-        raise NotImplementedError(f'Heuristics-based TS guess for reaction family {arc_reaction.family} '
-                                  f'is not implemented yet.')
-
-    arc_reaction.arc_species_from_rmg_reaction()
-    reactant_mol_combinations = list(itertools.product(*list(reactant.mol_list for reactant in arc_reaction.r_species)))
-    product_mol_combinations = list(itertools.product(*list(product.mol_list for product in arc_reaction.p_species)))
-    reaction_list = list()
-    for reactants in list(reactant_mol_combinations):
-        for products in list(product_mol_combinations):
-            reaction = label_molecules(list(reactants), list(products), arc_reaction.family)
-            if reaction is not None:
-                reaction_list.append(reaction)
-    xyz_guesses = list()
-
-    if arc_reaction.family.label == 'H_Abstraction':
-        xyz_guesses = h_abstraction(arc_reaction, reaction_list, dihedral_increment=dihedral_increment)
-
-    return xyz_guesses
 
 
 def label_molecules(reactants, products, family, output_with_resonance=False):
@@ -295,6 +382,8 @@ def h_abstraction(arc_reaction, rmg_reactions, r1_stretch=1.2, r2_stretch=1.2, a
 
     Returns:
         list: Entries are Cartesian coordinates of TS guesses for all reactions.
+
+    # Todo: make sure this function returns the desired format in the new implementation
     """
     xyz_guesses = list()
 
@@ -405,3 +494,7 @@ def h_abstraction(arc_reaction, rmg_reactions, r1_stretch=1.2, r2_stretch=1.2, a
 
     # learn bond stretches and the A-H-B angle for different atom types
     return xyz_guesses
+
+
+register_ts_adapter('heuristics', HeuristicsAdapter)
+
