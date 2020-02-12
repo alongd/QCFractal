@@ -8,20 +8,17 @@ Todo:
 """
 
 from enum import Enum
-import numpy as np
-import typing
-
-# from sqlalchemy.orm import column_property, relationship
-
-from .rmg_db import determine_reaction_family
-from .ts_adapters import TSAdapter
-
-import qcelemental as qcel
-# from qcfractal.storage_sockets.models.sql_models import KeywordsORM, KVStoreORM, MoleculeORM
 
 from rmgpy.data.rmg import RMGDatabase
 from rmgpy.reaction import Reaction
 from rmgpy.species import Species
+
+import qcelemental as qcel
+# from sqlalchemy.orm import column_property, relationship
+# from qcfractal.storage_sockets.models.sql_models import KeywordsORM, KVStoreORM, MoleculeORM
+
+from .rmg_db import determine_reaction_family
+from .ts_adapters.factory import ts_method_factory
 
 
 class TSMethodsEnum(str, Enum):
@@ -33,7 +30,7 @@ class TSMethodsEnum(str, Enum):
     gsm = 'gsm'  # double ended growing string method (DE-GSM)
     heuristics = 'heuristics'  # brute force heuristics
     kinbot = 'kinbot'  # KinBot
-    ml = 'ml'  # machine learning  Todo: will we have more than one ML module? probably yes... expand
+    ml = 'ml'  # machine learning  Todo: we'll probably have more than one ML module, expand
     neb_ase = 'neb_ase'  # NEB in ASE
     neb_terachem = 'neb_terachem'  # NEB in TeraChem
     qst2 = 'qst2'  # Synchronous Transit-Guided Quasi-Newton (STQN) implemented in Gaussian
@@ -64,7 +61,8 @@ class TSSearch(object):
             methods: list,
             levels: dict,
             user_guesses: list = None,
-            rmg_db: RMGDatabase = None
+            rmg_db: RMGDatabase = None,
+            dihedral_increment: float = 20,
     ) -> None:
         """
         Initializes a TSSearch instance.
@@ -89,6 +87,8 @@ class TSSearch(object):
             Entries are string representations of Cartesian coordinate.
         rmg_db: RMGDatabase, optional
             The RMG database object, mandatory for the following methods: 'autotst', 'heuristics', 'kinbot'.
+        dihedral_increment: float, optional
+            The scan dihedral increment to use when generating guesses.
         """
 
         if any([not isinstance(well, list) for well in [well_ids_1, well_ids_1]]):
@@ -116,6 +116,7 @@ class TSSearch(object):
         self.user_guesses = user_guesses
         self.rmg_db = rmg_db
         self.ts_guesses = dict()
+        self.dihedral_increment = dihedral_increment
 
         self.determine_rmg_reaction_and_family()
 
@@ -144,7 +145,12 @@ class TSSearch(object):
 
         for method in self.methods:
             if found(method):
-                ts_adapter = self.ts_method_factory(ts_adapter=method)
+                ts_adapter = ts_method_factory(ts_adapter=method,
+                                               user_guesses=self.user_guesses,
+                                               rmg_reaction=self.rmg_reaction,
+                                               dihedral_increment=self.dihedral_increment,
+                                               )
+
                 ts_guesses = ts_adapter.generate_guesses()
                 for ts_guess in ts_guesses:
                     if not colliding_atoms(ts_guess):
@@ -171,24 +177,6 @@ class TSSearch(object):
             self.rmg_reaction.family = determine_reaction_family(self.rmg_db, self.rmg_reaction)
         else:
             self.rmg_reaction = None
-
-    def ts_method_factory(self, ts_adapter: TSMethodsEnum) -> TSAdapter:
-        """
-        A factory generating the TS search method adapter corresponding to ``ts_adapter``.
-
-        Parameters
-        ----------
-        ts_adapter: TSMethodsEnum
-            A string representation for a TS search adapter.
-
-        Returns
-        -------
-        TSAdapter
-            The requested TSAdapter object, initialized with the respective reaction information,
-        """
-        ts_method = _registered_ts_adapters[ts_adapter](user_guesses=self.user_guesses,
-                                                        rmg_reaction=self.rmg_reaction)
-        return ts_method
 
 
 def found(method: TSMethodsEnum, raise_error: bool = False) -> bool:
@@ -232,11 +220,11 @@ def found(method: TSMethodsEnum, raise_error: bool = False) -> bool:
                 }
 
     return qcel.util.which(software_dict[method],
-                 return_bool=True,
-                 raise_error=raise_error,
-                 raise_msg=f'Please install {software_dict[method]} to use the {method} method, '
+                           return_bool=True,
+                           raise_error=raise_error,
+                           raise_msg=f'Please install {software_dict[method]} to use the {method} method, '
                            f'see {url_dict[method]} for more information',
-                 )
+                           )
 
 
 def colliding_atoms(ts_guess: dict) -> bool:
@@ -255,22 +243,3 @@ def colliding_atoms(ts_guess: dict) -> bool:
     """
 
     return not len(qcel.molutil.guess_connectivity(ts_guess['symbols'], ts_guess['geometry'], threshold=0.9))
-
-
-_registered_ts_adapters = {}
-
-
-def register_ts_adapter(ts_method: TSMethodsEnum, ts_method_class: typing.Type[TSAdapter]) -> None:
-    """
-    A register for TS search methods adapters.
-
-    Parameters
-    ----------
-    ts_method: TSMethodsEnum
-        A string representation for a TS search adapter.
-    ts_method_class: child(TSAdapter)
-        The TS search method adapter class (a child of TSAdapter).
-    """
-    if not issubclass(ts_method_class, TSAdapter):
-        raise TypeError(f'{ts_method_class} is not a TSAdapter.')
-    _registered_ts_adapters[ts_method] = ts_method_class
