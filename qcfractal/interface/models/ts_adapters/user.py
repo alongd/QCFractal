@@ -6,6 +6,7 @@ from rmgpy.reaction import Reaction
 
 from qcelemental.molparse.from_string import from_string
 
+from .factory import register_ts_adapter
 from .ts_adapter import TSAdapter
 
 
@@ -14,7 +15,10 @@ class UserAdapter(TSAdapter):
     A class for representing user guesses for a transition state.
     """
 
-    def __init__(self, user_guesses: list = None, rmg_reaction: Reaction = None) -> None:
+    def __init__(self, user_guesses: list = None,
+                 rmg_reaction: Reaction = None,
+                 dihedral_increment: float = 20,
+                 ) -> None:
         """
         Initializes a UserAdapter instance.
 
@@ -24,6 +28,8 @@ class UserAdapter(TSAdapter):
             TS user guesses.
         rmg_reaction: Reaction, optional
             The RMG Reaction object, not used in the UserAdapter class.
+        dihedral_increment: float, optional
+            The scan dihedral increment to use when generating guesses, not used in the UserAdapter class.
         """
         if user_guesses is not None and not isinstance(user_guesses, list):
             raise TypeError(f'user_guessed must be a list, got\n'
@@ -69,3 +75,6 @@ class UserAdapter(TSAdapter):
                             'elem': symbols,
                             })
         return results
+
+
+register_ts_adapter('user', UserAdapter)
