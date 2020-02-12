@@ -4,7 +4,6 @@ A module for the abstract TSAdapter class
 
 from abc import ABC, abstractmethod
 
-
 class TSAdapter(ABC):
 
     @abstractmethod
